@@ -1,0 +1,206 @@
+---
+title: "Social Network Analysis of the Twitter hashtag #intled"
+author: "Soraya Campbell"
+date: "`r format(Sys.Date(),'%B %e, %Y')`"
+output:
+ revealjs::revealjs_presentation:
+  theme: night
+  highlight: haddock
+  transition: convex
+  fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidytext)
+library(readxl)
+library(writexl)
+library(rtweet)
+library(tweetrmd)
+library(knitr)
+library(tidygraph)
+library(ggraph)
+library(kableExtra)
+
+intled_net<-read_excel("intl_net.xlsx")
+```
+
+## \#intled Twitter Network
+
+Those in the international education (IE) community, which is mainly comprised of study abroad, international student and faculty services, and international admissions professionals, discuss and share news and ideas affecting the community through the use of the hashtag \#intled.
+
+Having observed this community for years, I am curious about the social network that has been created on Twitter surrounding this topic.
+
+![](https://media.giphy.com/media/ftAyb0CG1FNAIZt4SO/giphy.gif)
+
+## Purpose
+
+For this independent analysis, I will construct a network from an edgelist of interactions surrounding \#intled.
+
+The research question I hope to answer is the following:
+
+> What are the patterns of peer interaction and the structure of peer networks surrounding \#intled on Twitter?
+
+By analyzing the Twitter network, IE professionals can gain an understanding of the actors engaging through this medium and discern their own meaning into the network of these interactions.
+
+## Methods
+
+My analysis follows the work in [Data Science in Education Using R: Exploring Relationship Using Social Network Analysis with Social Media Data](https://datascienceineducation.com/c12.html). In order to create the social network for analysis, the following steps were followed:
+
+1.  Pull twitter data
+2.  Wrangle data
+3.  Put edgelist together
+4.  Plot
+
+## Pulling Tweets {.smaller}
+
+I used to the `rtweet` package to pull the latest 500 tweets for the hashtag \#intled and placed it into a dataframe. This resulted in 336 observations.
+
+```{r, eval=FALSE, echo=TRUE}
+##authenticate
+token<-create_token(
+  app =app_name,
+  consumer_key = api_key,
+  consumer_secret=api_secret_key,
+  access_token = access_token, 
+  access_secret = access_token_secret)
+
+intled_net <-search_tweets("#intled", n=500, include_rts = FALSE)
+```
+
+## Tweet results
+
+```{r, eval=TRUE, echo=TRUE}
+glimpse(intled_net)
+```
+
+## Wrangle Data
+
+Next, twitter mentions were extracted from the data. The functions `regex` 😑 and `mutate` were used to identify all the usernames in the tweets and `unnest` was used to move every mention to its own line. The tweets were put then into a dataframe called `mentions`.
+
+```{r, eval=TRUE,echo=TRUE}
+#regex
+regex <- "@([A-Za-z]+[A-Za-z0-9_]+)(?![A-Za-z0-9_]*\\.)"
+
+intled_net_usernames <-
+  intled_net %>%
+  # Use regular expression to identify all the usernames in a tweet
+  mutate(all_mentions = str_extract_all(text, regex)) %>%
+  unnest(all_mentions)
+
+mentions <-intled_net_usernames%>%
+  mutate(all_mentions = str_trim(all_mentions))%>%
+  select(sender=screen_name, all_mentions)
+```
+
+## Living on the Edge
+
+To put together the edgelist, the `@` symbol was removed from the `all_mentions` column. The number of interactions were counted, then the list was filtered only to include users who sent more than one interaction based on the number of interactions.
+
+```{r, eval=TRUE, echo=TRUE}
+#remove @
+edgelist <- 
+  mentions %>% 
+  # remove "@" from all_mentions column
+  mutate(all_mentions = str_sub(all_mentions, start = 2)) %>% 
+  # rename all_mentions to receiver
+  select(sender, receiver = all_mentions)
+```
+
+```{r, eval=TRUE, echo=TRUE}
+
+interactions_sent <- edgelist %>% 
+  # this counts how many interactions each individual sent 
+  count(sender) %>% 
+  # arranges the df in descending order of the # of interactions sent
+  arrange(desc(n))
+
+edgelist <- edgelist %>% 
+  # the first line filters to include only senders in the interactions_sent df
+  # the second line does the same, for receivers
+  filter(sender %in% interactions_sent$sender,
+         receiver %in% interactions_sent$sender)
+```
+
+## Create graph object {.smaller}
+
+Now it's time to plot. I used the [`as_tbl_graph()`](https://www.rdocumentation.org/packages/tidygraph/versions/1.2.0/topics/as_tbl_graph.data.frame) function from `{tidygraph}` to make the dataframe into an object with nodes and edges for a social network graph.
+
+```{r, eval=TRUE, echo=TRUE}
+g<-as_tbl_graph(edgelist)
+```
+
+```{r, eval=FALSE, echo=TRUE}
+# A tbl_graph: 22 nodes and 22 edges
+#
+# A directed multigraph with 9 components
+#
+# Node Data: 22 x 1 (active)
+  name           
+  <chr>          
+1 ShawnVanderziel
+2 EstherAtNAFSA  
+3 ThePIEReview   
+4 eduKUDU        
+5 toddleegoen    
+6 NicoleLongstaff
+# ... with 16 more rows
+#
+# Edge Data: 22 x 2
+   from    to
+  <int> <int>
+1     1     2
+2     1    15
+3     1     2
+# ... with 19 more rows
+```
+
+## The Plot thickens
+
+Finally, the plot was created using `ggraph`. The results, including the names of the actors, the network of interactions, and the measure of centrality were included in the results.
+
+```{r, eval=FALSE, echo=TRUE}
+g %>% 
+    # this calculates the centrality of each individual using the built-in centrality_authority() function
+    mutate(centrality = centrality_authority()) %>% 
+    ggraph(layout = "kk") + 
+    geom_node_point(aes(size = centrality, color = centrality)) +
+    # add label for names of actors 
+    geom_node_label(aes(label=name), repel=TRUE)+
+    # this line colors the points based upon their centrality
+    scale_color_continuous(guide = 'legend') + 
+    geom_edge_link(alpha = .2) +
+    theme_graph()
+```
+
+## Social Network \#intled
+
+![](intledRplot.png)
+
+## Results
+
+The plot shows a network with not a whole lot of connectivity. There are many dyad pairs represented here. Many of the actors are organizational accounts, and there is some interaction between organizations and individuals that are part of the organization. The actor @NAFSA, which is the organizational account of the main professional organization for IE, is at the center of a group that includes its President, @EstherAtNAFSA, and users who are members.
+
+This analysis used the measure `centrality_authority` which purports to measure how influential an individual may be based on the interactions observed. It identified the user @eddiepwest has having a large measure of centrality, or importance. However, for this network, it seems like this measure is not as useful in this context.
+
+## Discussion
+
+This analysis is based on a small network of those who interact around the \#intled hashtag on Twitter. Based on the results, the discussions taking place using this hashtag are a bit 'closed', with not much connectivity between the actors. Interactions taking place are really between people who are part or closely related to the same organization - the network is very homophilous.
+
+The results illustrated an observation I had that the people using the hashtag mainly do so to disseminate information but do not really interact with one another. Since this analysis only looked at mentions from one actor to another, to improve upon things, it might be worth it to include in the edge data one or all of the following:
+
+-   retweet count
+-   favorite count
+-   quote count
+
+## Final Thoughts
+
+The \#intled network on Twitter is not as active as some other education related hashtags, but it does have a good amount of users who disseminate information regularly. Based on this analysis, the interactions between users surrounding this topic is sparse. If IE professionals would like to engage on this topic, it might be worth it to look into other mediums, such as the professional organizations' various discussion forums, list-servs, Facebook, or Discord.
+
+```{r, eval=TRUE, echo=FALSE}
+tweet_embed("https://twitter.com/EstherAtNAFSA/status/1403112514754318339?s=20")
+```
